@@ -44,6 +44,12 @@ Also available on the new Wolff's Room Store!
 Visit [Wolff's Room](https://wolffsroom.github.io/WolffsRoomSite/) or download it directly through the Wolff's Store app for PlayStation Vita!
 
 
+### Installing through Wolff's Store
+
+With **Wolff's Store v1.0.5 or newer**, you can choose **Download only** (the ZIP is saved under `ux0:Downloads/Plugins/`) or **Download and install**. The latter requires confirmation, backs up the existing taiHEN configuration and plug-in, and installs files to `ur0:tai/` and `ux0:data/DDTouchUI/`. Reboot the PS Vita after installing.
+
+[Wolff's Store](https://github.com/WolffsRoom/WolffsStore/releases/latest)
+
 ## Installation
 
 **Requirements:** 
