@@ -8,7 +8,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/VERSION-v0.59-a12626?style=for-the-badge" alt="v0.59">
-  <img src="https://img.shields.io/badge/STATUS-EXPERIMENTAL-99724c?style=for-the-badge" alt="Experimental">
+  <img src="https://img.shields.io/badge/STATUS-WORKING-2e7d52?style=for-the-badge" alt="Working">
   <img src="https://img.shields.io/badge/PLATFORM-PS%20VITA-3c4f65?style=for-the-badge&logo=playstation&logoColor=white" alt="PS Vita">
 </p>
 
