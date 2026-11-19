@@ -1,0 +1,17 @@
+﻿cmake_minimum_required(VERSION 3.10)
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+ if(DEFINED ENV{VITASDK})
+  set(CMAKE_TOOLCHAIN_FILE "$ENV{VITASDK}/share/vita.toolchain.cmake" CACHE PATH "Vita toolchain")
+ else()
+  message(FATAL_ERROR "VITASDK is required")
+ endif()
+endif()
+project(DDTouchUI C)
+include("${VITASDK}/share/vita.cmake" REQUIRED)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -O2 -std=gnu11 -Wl,-q")
+add_executable(DDTouchUI src/plugin.c)
+target_link_libraries(DDTouchUI taihen_stub SceLibKernel_stub SceKernelModulemgr_stub SceKernelThreadMgr_stub SceTouch_stub_weak SceDisplay_stub SceAudio_stub SceCtrl_stub SceIofilemgr_stub k gcc)
+set_target_properties(DDTouchUI PROPERTIES LINK_FLAGS "-nostdlib")
+vita_create_self(DDTouchUI.suprx DDTouchUI CONFIG ${CMAKE_SOURCE_DIR}/DDTouchUI.yml)
+
+

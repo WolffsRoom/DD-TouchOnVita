@@ -1,0 +1,8 @@
+build/
+work/
+*.velf
+*.elf
+*.vpk
+*.suprx
+*.zip
+__pycache__/
