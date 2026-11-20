@@ -93,6 +93,18 @@ A homebrew-enabled PS Vita with taiHEN and a legitimate installation of **Darkes
 | **Start + L** | Open / close the TouchOnVita panel |
 | D-Pad, Cross, Circle | Navigate, confirm and close the panel |
 
+## Troubleshooting
+
+If **Start + L** does not open the panel, or only text appears:
+
+- Old save files are not a dependency. **RePatch is not required**.
+- Confirm the active taiHEN config: if ux0:tai/config.txt exists, it may take priority over ur0:tai/config.txt. The active *PCSE00919 section must load ur0:tai/DDTouchUI.suprx.
+- Check that mode.ini and all six .rgba files are directly under ux0:data/DDTouchUI/. Set mode=1 and enable menu_click, widget_probe, direct_click and direct_all_widgets.
+- Reload taiHEN configuration after changing it, fully close the game and reopen. Do not hold L during game startup, which may suppress plugins.
+- If still broken, send hooks.txt, engine_hook_init.txt and engine_compat_probe_v047.txt from ux0:data/DDTouchUI/. Native hooks intentionally refuse unknown executable layouts.
+
+See [v0.60 diagnostic investigation](docs/V060_DIAGNOSTICO_INSTALACAO_STOCK_117.md). **v0.60 is an unverified testing branch; the latest public release remains v0.59.**
+
 ## What Doesn't Work / Limitations
 
 - Map dragging, inventory drag-and-drop and advanced multitouch gestures are not fully implemented.
