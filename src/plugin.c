@@ -71,6 +71,8 @@ static volatile unsigned int diag_next_frame=400,diag_write_step=0;
 static int diag_detailed_enabled=0;
 
 static volatile unsigned int controller_active_frames=0;
+/* Last usable diagnostic directory: 0=not writable, 1=ux0, 2=ur0. */
+static volatile int dd_diag_path=0,dd_diag_last_error=0;
 static void trace_once(const char *filename,const char *text);
 /* v0.35: read-only native UI pointer hit test plus optional virtual controller
    pulses. All physical pad inputs are preserved and OR'ed into returned data.
@@ -772,9 +774,38 @@ static void engine_hook_report(void){
  dd_hover_persist,dd_hover_focus_suppressed,dd_hover_touch_releases);
  trace_once("ux0:data/DDTouchUI/engine_hook_status.txt",output);
 }
-static void trace_once(const char *filename,const char *text){
+static int dd_write_log(const char *filename,const char *text){
  int fd=sceIoOpen(filename,SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC,0666);
- if(fd>=0){sceIoWrite(fd,text,strlen(text));sceIoClose(fd);}
+ if(fd<0)return fd;
+ int size=(int)strlen(text);
+ int written=sceIoWrite(fd,text,size);
+ sceIoClose(fd);
+ if(written!=size)return written<0?written:-1;
+ return 0;
+}
+/* Keep diagnostics available even if ux0:data is temporarily inaccessible.
+   Never write to taiHEN config, saves, or game install directories. */
+static void trace_once(const char *filename,const char *text){
+ int r=dd_write_log(filename,text);
+ if(r<0 && !strncmp(filename,"ux0:data/DDTouchUI/",strlen("ux0:data/DDTouchUI/"))){
+  /* The directory may not have been present when the game was mounted. */
+  sceIoMkdir("ux0:data/DDTouchUI",0777);
+  r=dd_write_log(filename,text);
+ }
+ if(r>=0){
+  dd_diag_path=1;dd_diag_last_error=0;return;
+ }
+ dd_diag_last_error=r;
+ const char *prefix="ux0:data/DDTouchUI/";
+ const size_t plen=strlen(prefix);
+ if(strncmp(filename,prefix,plen))return;
+ /* Only logs from the dedicated DDTouchUI folder can use this fallback. */
+ char fallback[160];
+ sceIoMkdir("ur0:data/DDTouchUI",0777);
+ sceClibSnprintf(fallback,sizeof(fallback),"ur0:data/DDTouchUI/%s",filename+plen);
+ r=dd_write_log(fallback,text);
+ if(r>=0){dd_diag_path=2;dd_diag_last_error=0;}
+ else {dd_diag_path=0;dd_diag_last_error=r;}
 }
 
 static const char *cfg="ux0:data/DDTouchUI/mode.ini";
@@ -1354,6 +1385,15 @@ static int ui_assets_complete(void){
  return ui_bg_ok && ui_selector_ok && ui_on_ok && ui_off_ok &&
         ui_banner_ready[0] && ui_banner_ready[1];
 }
+static const char *ui_first_missing_asset(void){
+ if(!ui_bg_ok)return "UI RGBA";
+ if(!ui_selector_ok)return "SELECTOR RGBA";
+ if(!ui_on_ok)return "ON RGBA";
+ if(!ui_off_ok)return "OFF RGBA";
+ if(!ui_banner_ready[0])return "MOD OFF RGBA";
+ if(!ui_banner_ready[1])return "MOD ON RGBA";
+ return "ALL READY";
+}
 static void ui_assets_report(const char *phase){
  const char *names[6]={"UI.rgba","Selector.rgba","On.rgba","Off.rgba",
                        "Mod_off.rgba","Mod_on.rgba"};
@@ -1483,8 +1523,15 @@ static void ui_draw_overlay(const SceDisplayFrameBuf*b){
   draw(b,550,298,dd_fast_input?(dd_spatial_only?"SAFE":"FAST"):"LEGACY",0xFF27201D);
   draw(b,548,354,"RESET",0xFF27201D);
   ui_glyph_opacity=255;
-  if(!engine_compatible)draw(b,365,419,"NO GAME HOOK",0xFF2626C0);
-  else if(!ui_assets_complete())draw(b,365,419,"UI FILES MISSING",0xFF2626C0);
+  if(!engine_compatible)draw(b,342,420,"NO GAME HOOK",0xFF2626C0);
+  if(!ui_assets_complete()){
+   /* Works without sprites or writable logs: ask user for a screenshot. */
+   draw(b,342,409,"UI FILES MISSING",0xFF2626C0);
+   draw(b,342,431,ui_first_missing_asset(),0xFF2626C0);
+   draw(b,342,452,dd_diag_path==1?"LOGS UX0 DATA":
+                   dd_diag_path==2?"LOGS UR0 DATA":
+                                   "NO LOG ACCESS",0xFF2626C0);
+  }
  }
  if(popup>0){
   int state=(mode && engine_compatible)?1:0;
@@ -1914,17 +1961,13 @@ static void release(void){
 }
 static void status_log(void){
  sceIoMkdir("ux0:data/DDTouchUI",0777);
- int fd=sceIoOpen("ux0:data/DDTouchUI/hooks.txt",SCE_O_CREAT|SCE_O_WRONLY|SCE_O_TRUNC,0666);
- if(fd>=0){
-  char status[]="Read=0\nRead2=0\nPeek=0\nPeek2=0\nDisplay=0\n";
-  status[5]='0'+enabled[0];
-  status[13]='0'+enabled[1];
-  status[20]='0'+enabled[2];
-  status[28]='0'+enabled[3];
-  status[38]='0'+enabled[4];
-  sceIoWrite(fd,status,strlen(status));
-  sceIoClose(fd);
- }
+ char status[]="Read=0\nRead2=0\nPeek=0\nPeek2=0\nDisplay=0\n";
+ status[5]='0'+enabled[0];
+ status[13]='0'+enabled[1];
+ status[20]='0'+enabled[2];
+ status[28]='0'+enabled[3];
+ status[38]='0'+enabled[4];
+ trace_once("ux0:data/DDTouchUI/hooks.txt",status);
 }
 int module_start(SceSize argc,const void*args);
 int _start(SceSize argc,const void*args) __attribute__((weak,alias("module_start")));
