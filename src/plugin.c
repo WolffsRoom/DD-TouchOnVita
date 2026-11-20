@@ -18,7 +18,7 @@
 #define CHORD (SCE_CTRL_START | SCE_CTRL_LTRIGGER)
 static SceUID hooks[24];
 static tai_hook_ref_t refs[24];
-static int mode=0,popup=180,menu_open=0,front_was_pressed=0;
+static int mode=1,popup=180,menu_open=0,front_was_pressed=0;
 static int ui_fade=0; /* overlay alpha: 0..255 */
 static uint8_t enabled[24]={0};
 static uint32_t old_buttons=0;
@@ -75,7 +75,7 @@ static void trace_once(const char *filename,const char *text);
 /* v0.35: read-only native UI pointer hit test plus optional virtual controller
    pulses. All physical pad inputs are preserved and OR'ed into returned data.
    We hook eboot imports only: never modify global system SceCtrl behavior. */
-static int dd_enable_doubletap=1,dd_enable_map=1,dd_enable_hero=1;
+static int dd_enable_doubletap=0,dd_enable_map=1,dd_enable_hero=1;
 static int dd_enable_modal_close=1;
 static volatile unsigned int dd_modal_close_events=0,dd_inventory_map_suppressed=0;
 static volatile unsigned int dd_immediate_events=0,dd_cursor_detaches=0,dd_joystick_handoffs=0;
@@ -87,7 +87,7 @@ static volatile int dd_pointer_moved=0;
    Cross/Square/right-stick emulation is forbidden in this mode because it
    can activate the focused (wrong) attack instead of the tapped one. */
 static int dd_fast_input=1;
-static int ui_sounds_enabled=1;
+static int ui_sounds_enabled=0;
 static int diag_runtime_enabled=0;
 static volatile unsigned int dd_frame_no=0;
 static volatile unsigned int dd_fast_touches=0,dd_fast_up_events=0;
@@ -103,15 +103,15 @@ static volatile unsigned int dd_hover_touch_releases=0;
 /* Internal GUI router probe: emulator-only opt-in until validated on physical
    hardware. Read native widget output for spatial hit detection, NEVER write
    to engine widget focus or callback data. */
-static int dd_widget_probe=0;
-static int dd_menu_click=0;
+static int dd_widget_probe=1;
+static int dd_menu_click=1;
 static volatile int dd_menu_authorized=0;
 static volatile unsigned int dd_menu_armed=0,dd_menu_held_frames=0,dd_menu_denied=0;
 static volatile unsigned int dd_menu_click_ref=0,dd_menu_click_id=0;
 /* v0.58 native widget activation, independent from simulated Cross.
    GUI dispatcher returns event[0]=hover and event[1]=confirm; never
    emit confirmation without a positive spatial hover on the touch. */
-static int dd_direct_click=0,dd_direct_all_widgets=0;
+static int dd_direct_click=1,dd_direct_all_widgets=1;
 static volatile unsigned int dd_direct_gesture=0,dd_direct_completed=0;
 static volatile unsigned int dd_direct_attempts=0,dd_direct_allowed=0,dd_direct_denied=0;
 static volatile unsigned int dd_direct_last_ref=0,dd_direct_last_widget=0;
@@ -488,8 +488,8 @@ static int hook_engine_native_focus(unsigned int idlo,unsigned int idhi){
  /* In v0.46 the old controller focus won immediately after release.
     While a latched pointer remains, suppress only GUI comparator matches,
     never inject Cross or interfere with the gameplay controller path. */
- int finger=engine_touch_valid && engine_touch_held;
- int sticky=dd_hover_persist && dd_fast_input && dd_spatial_only &&
+ int finger=mode && engine_touch_valid && engine_touch_held;
+ int sticky=mode && dd_hover_persist && dd_fast_input && dd_spatial_only &&
             dd_hover_latched && dd_pointer_moved && !menu_open;
  if(!finger && !sticky)
   return TAI_CONTINUE(int,refs[15],idlo,idhi);
@@ -562,9 +562,9 @@ static void hook_engine_widget_probe(void *out,void *widget,unsigned int b2,unsi
     data on EVERY widget call even before any front touch / menu appeared.
     Never read any game UI pointer until a real gesture is active.
     While idle this callback is exactly a pass-through. */
- int finger=engine_touch_valid &&
+ int finger=mode && engine_touch_valid &&
             (engine_touch_held || engine_mouse_up_frames>0u);
- int sticky=dd_hover_persist && dd_fast_input && dd_spatial_only &&
+ int sticky=mode && dd_hover_persist && dd_fast_input && dd_spatial_only &&
             dd_hover_latched && dd_pointer_moved && !menu_open;
  /* Startup stays a strict pass-through; in particular, no dereference
     of GUI pointers before touch, as required by the v0.44 crash fix. */
@@ -582,7 +582,7 @@ static void hook_engine_widget_probe(void *out,void *widget,unsigned int b2,unsi
  if(!finger || !dd_widget_probe || !out || !widget)return;
  dd_widget_fast_active++;
  const volatile uint8_t*event=(const volatile uint8_t*)out;
- if(dd_direct_click && dd_menu_click && engine_touch_held &&
+ if(mode && dd_direct_click && dd_menu_click && engine_touch_held &&
     !menu_open && !ui_panel_capture && engine_compatible &&
     b3 && event[0] && !event[1] && dd_direct_completed!=dd_direct_gesture &&
     engine_gui_reference_id && widget){
@@ -778,34 +778,65 @@ static void trace_once(const char *filename,const char *text){
 }
 
 static const char *cfg="ux0:data/DDTouchUI/mode.ini";
+/* Config parser v0.60: exact key/value matching, accepts CRLF and UTF-8
+   BOM. Missing/invalid configuration retains a safe working default and
+   creates a diagnostic file rather than silently disabling all touch. */
+static int config_read_state=-1,config_fields=0,config_unknown=0;
+static void config_set_flag(const char *k,int v){
+ if(!strcmp(k,"mode"))mode=v;
+ else if(!strcmp(k,"doubletap"))dd_enable_doubletap=v;
+ else if(!strcmp(k,"hero_touch"))dd_enable_hero=v;
+ else if(!strcmp(k,"map_touch"))dd_enable_map=v;
+ else if(!strcmp(k,"outside_close"))dd_enable_modal_close=v;
+ else if(!strcmp(k,"detailed_logs"))diag_detailed_enabled=v;
+ else if(!strcmp(k,"focus_hold"))dd_focus_hold_enabled=v;
+ else if(!strcmp(k,"fast_input"))dd_fast_input=v;
+ else if(!strcmp(k,"runtime_logs"))diag_runtime_enabled=v;
+ else if(!strcmp(k,"spatial_only"))dd_spatial_only=v;
+ else if(!strcmp(k,"hover_persist"))dd_hover_persist=v;
+ else if(!strcmp(k,"widget_probe"))dd_widget_probe=v;
+ else if(!strcmp(k,"repeat_confirm"))dd_repeat_confirm=v;
+ else if(!strcmp(k,"ui_sounds"))ui_sounds_enabled=v;
+ else if(!strcmp(k,"direct_click"))dd_direct_click=v;
+ else if(!strcmp(k,"direct_all_widgets"))dd_direct_all_widgets=v;
+ else if(!strcmp(k,"menu_click"))dd_menu_click=v;
+ else {config_unknown++;return;}
+ config_fields++;
+}
+static char *config_trim(char *p){
+ while(*p==' ' || *p=='\t' || *p=='\r')p++;
+ char *end=p+strlen(p);
+ while(end>p && (end[-1]==' ' || end[-1]=='\t' ||
+                  end[-1]=='\r'))*--end=0;
+ return p;
+}
 static void load_config(void){
  int f=sceIoOpen(cfg,SCE_O_RDONLY,0);
- if(f<0)return;
- char b[384]={0};
+ if(f<0){config_read_state=f;return;}
+ char b[768]={0};
  int n=sceIoRead(f,b,sizeof(b)-1);
  sceIoClose(f);
+ config_read_state=n;
  if(n<=0)return;
- if(strstr(b,"mode=1"))mode=1;
- if(strstr(b,"doubletap=0"))dd_enable_doubletap=0;
- if(strstr(b,"hero_touch=0"))dd_enable_hero=0;
- if(strstr(b,"map_touch=0"))dd_enable_map=0;
- if(strstr(b,"outside_close=0"))dd_enable_modal_close=0;
- if(strstr(b,"detailed_logs=1"))diag_detailed_enabled=1;
- if(strstr(b,"focus_hold=0"))dd_focus_hold_enabled=0;
- if(strstr(b,"fast_input=0"))dd_fast_input=0;
- if(strstr(b,"runtime_logs=1"))diag_runtime_enabled=1;
- if(strstr(b,"spatial_only=0"))dd_spatial_only=0;
- if(strstr(b,"hover_persist=1"))dd_hover_persist=1;
- if(strstr(b,"hover_persist=0"))dd_hover_persist=0;
- if(strstr(b,"widget_probe=1"))dd_widget_probe=1;
- if(strstr(b,"repeat_confirm=1"))dd_repeat_confirm=1;
- if(strstr(b,"ui_sounds=0"))ui_sounds_enabled=0;
- if(strstr(b,"direct_click=1"))dd_direct_click=1;
- if(strstr(b,"direct_all_widgets=1"))dd_direct_all_widgets=1;
- if(strstr(b,"menu_click=1")){
-  dd_menu_click=1;
-  dd_widget_probe=1;
+ /* Strip BOM on Windows-authored settings. */
+ char *p=b;
+ if(n>=3 && (unsigned char)p[0]==0xef &&
+    (unsigned char)p[1]==0xbb && (unsigned char)p[2]==0xbf)p+=3;
+ while(*p){
+  char *line=p;
+  while(*p && *p!='\n')p++;
+  if(*p)*p++=0;
+  char *item=config_trim(line);
+  if(!*item || *item=='#' || *item==';')continue;
+  char *eq=strchr(item,'=');
+  if(!eq){config_unknown++;continue;}
+  *eq++=0;
+  char *key=config_trim(item),*value=config_trim(eq);
+  if((value[0]=='0' || value[0]=='1') && !value[1])
+   config_set_flag(key,value[0]=='1');
+  else config_unknown++;
  }
+ if(dd_menu_click)dd_widget_probe=1;
 }
 static void save_config(void){
  sceIoMkdir("ux0:data/DDTouchUI",0777);
@@ -1282,7 +1313,10 @@ static uint32_t ui_toggle_on[TOGGLE_W*TOGGLE_H];
 static uint32_t ui_toggle_off[TOGGLE_W*TOGGLE_H];
 /* Cache BOTH status banners at boot: switching mode must never read from SD. */
 static uint32_t ui_banners[2][STATUS_W*STATUS_H];
-static int ui_loaded=0,ui_banners_loaded=0,ui_banner_ready[2]={0,0};
+static int ui_loaded=0,ui_banners_loaded=0;
+static volatile int ui_banner_ready[2]={0,0};
+static volatile int ui_asset_retry_running=0;
+static SceUID ui_asset_retry_thread=-1;
 static int ui_read_sprite(const char *file,unsigned char *dst,int bytes){
  int fd=sceIoOpen(file,SCE_O_RDONLY,0);
  if(fd<0)return 0;
@@ -1295,7 +1329,7 @@ static int ui_read_sprite(const char *file,unsigned char *dst,int bytes){
  sceIoClose(fd);
  return n==bytes;
 }
-static int ui_bg_ok=0,ui_selector_ok=0,ui_on_ok=0,ui_off_ok=0;
+static volatile int ui_bg_ok=0,ui_selector_ok=0,ui_on_ok=0,ui_off_ok=0;
 static void ui_load_sprites(void){
  if(ui_loaded)return;
  ui_loaded=1;
@@ -1311,6 +1345,86 @@ static void ui_load_banners(void){
    (unsigned char*)ui_banners[0],sizeof(ui_banners[0]));
  ui_banner_ready[1]=ui_read_sprite("ux0:data/DDTouchUI/Mod_on.rgba",
    (unsigned char*)ui_banners[1],sizeof(ui_banners[1]));
+}
+
+/* v0.60: the first ux0: read may fail during taiHEN reload, leaving a
+   text-only "ghost" menu. Retry missing assets from a low-priority worker,
+   NEVER in the display hook. */
+static int ui_assets_complete(void){
+ return ui_bg_ok && ui_selector_ok && ui_on_ok && ui_off_ok &&
+        ui_banner_ready[0] && ui_banner_ready[1];
+}
+static void ui_assets_report(const char *phase){
+ const char *names[6]={"UI.rgba","Selector.rgba","On.rgba","Off.rgba",
+                       "Mod_off.rgba","Mod_on.rgba"};
+ const int expected[6]={BG_W*BG_H*4,SELECT_W*SELECT_H*4,
+  TOGGLE_W*TOGGLE_H*4,TOGGLE_W*TOGGLE_H*4,
+  STATUS_W*STATUS_H*4,STATUS_W*STATUS_H*4};
+ const int ok[6]={ui_bg_ok,ui_selector_ok,ui_on_ok,ui_off_ok,
+                  ui_banner_ready[0],ui_banner_ready[1]};
+ char output[790];
+ int len=sceClibSnprintf(output,sizeof(output),
+    "v0.60 phase=%s complete=%d config_bytes=%d config_fields=%d "
+    "config_invalid=%d mode=%d engine=%d\n",
+    phase,ui_assets_complete(),config_read_state,config_fields,
+    config_unknown,mode,engine_compatible);
+ for(int i=0;i<6 && len<(int)sizeof(output)-100;i++){
+  char path[96];
+  sceClibSnprintf(path,sizeof(path),"ux0:data/DDTouchUI/%s",names[i]);
+  SceIoStat st;
+  memset(&st,0,sizeof(st));
+  int result=sceIoGetstat(path,&st);
+  int actual=result<0?-1:(int)st.st_size;
+  len+=sceClibSnprintf(output+len,sizeof(output)-len,
+     "%s ready=%d actual=%d expected=%d io=%08x\n",
+     names[i],ok[i],actual,expected[i],(unsigned int)result);
+ }
+ trace_once("ux0:data/DDTouchUI/assets_status_v060.txt",output);
+}
+static void ui_assets_retry_missing(void){
+ if(!ui_bg_ok)ui_bg_ok=ui_read_sprite("ux0:data/DDTouchUI/UI.rgba",
+    (unsigned char*)ui_bg,sizeof(ui_bg));
+ if(!ui_selector_ok)ui_selector_ok=ui_read_sprite(
+    "ux0:data/DDTouchUI/Selector.rgba",(unsigned char*)ui_selector,sizeof(ui_selector));
+ if(!ui_on_ok)ui_on_ok=ui_read_sprite(
+    "ux0:data/DDTouchUI/On.rgba",(unsigned char*)ui_toggle_on,sizeof(ui_toggle_on));
+ if(!ui_off_ok)ui_off_ok=ui_read_sprite(
+    "ux0:data/DDTouchUI/Off.rgba",(unsigned char*)ui_toggle_off,sizeof(ui_toggle_off));
+ if(!ui_banner_ready[0])ui_banner_ready[0]=ui_read_sprite(
+    "ux0:data/DDTouchUI/Mod_off.rgba",
+    (unsigned char*)ui_banners[0],sizeof(ui_banners[0]));
+ if(!ui_banner_ready[1])ui_banner_ready[1]=ui_read_sprite(
+    "ux0:data/DDTouchUI/Mod_on.rgba",
+    (unsigned char*)ui_banners[1],sizeof(ui_banners[1]));
+}
+static int ui_assets_retry_worker(SceSize argc,void *args){
+ (void)argc;(void)args;
+ for(int i=0;i<20 && ui_asset_retry_running;i++){
+  sceKernelDelayThread(200000);
+  if(i%5==4){
+   ui_assets_retry_missing();
+   if(ui_assets_complete())break;
+  }
+ }
+ ui_assets_report(ui_assets_complete()?"recovered":"missing_or_invalid");
+ return 0;
+}
+static void ui_assets_start_retry(void){
+ ui_assets_report("initial");
+ if(ui_assets_complete())return;
+ ui_asset_retry_running=1;
+ ui_asset_retry_thread=sceKernelCreateThread("ddtouch_assets",ui_assets_retry_worker,
+                                        0x10000180,0x6000,0,0,NULL);
+ if(ui_asset_retry_thread>=0)sceKernelStartThread(ui_asset_retry_thread,0,NULL);
+ else {ui_asset_retry_running=0;ui_assets_report("retry_thread_failed");}
+}
+static void ui_assets_stop_retry(void){
+ ui_asset_retry_running=0;
+ if(ui_asset_retry_thread>=0){
+  sceKernelWaitThreadEnd(ui_asset_retry_thread,NULL,NULL);
+  sceKernelDeleteThread(ui_asset_retry_thread);
+  ui_asset_retry_thread=-1;
+ }
 }
 /* Fast RGBA8888 software blend: one 32-bit load per pixel, no division.
    The previous version performed 3 scalar divisions per alpha pixel,
@@ -1369,6 +1483,8 @@ static void ui_draw_overlay(const SceDisplayFrameBuf*b){
   draw(b,550,298,dd_fast_input?(dd_spatial_only?"SAFE":"FAST"):"LEGACY",0xFF27201D);
   draw(b,548,354,"RESET",0xFF27201D);
   ui_glyph_opacity=255;
+  if(!engine_compatible)draw(b,365,419,"NO GAME HOOK",0xFF2626C0);
+  else if(!ui_assets_complete())draw(b,365,419,"UI FILES MISSING",0xFF2626C0);
  }
  if(popup>0){
   int state=(mode && engine_compatible)?1:0;
@@ -1747,13 +1863,13 @@ static void engine_hooks_init(void){
      This is a safety boundary: the game retains its own focus and controller
      callback handling. Touch is injected only as mouse coordinates/button. */
   engine_compatible=1;
-  if(dd_widget_probe && mode && dd_fast_input){
+  if(dd_widget_probe && dd_fast_input){
    int rc=taiHookFunctionOffset(&refs[14],info.modid,0,0x3710C,1,
                                (void*)hook_engine_widget_probe);
    if(rc>=0){hooks[14]=rc;enabled[14]=1;}
    else {dd_widget_probe=0;dd_menu_click=0;}
   }
-  if(dd_menu_click && mode && dd_fast_input && enabled[14]){
+  if(dd_menu_click && dd_fast_input && enabled[14]){
    int rc=taiHookFunctionOffset(&refs[15],info.modid,0,0x49F66,1,
                                (void*)hook_engine_native_focus);
    if(rc>=0){hooks[15]=rc;enabled[15]=1;}
@@ -1827,6 +1943,7 @@ int module_start(SceSize argc,const void*args){
  /* v0.59: preload artwork, avoiding synchronous SD/FTP device reads on menu open. */
  ui_load_sprites();
  ui_load_banners();
+ ui_assets_start_retry();
  /* Hook only the game's SceCtrl imports; physical controls remain intact. */
  if(engine_compatible){
   const uint32_t ids[8]={
@@ -1843,8 +1960,21 @@ int module_start(SceSize argc,const void*args){
     dd_ctrl_hook_mask|=1u<<i;
  }
  dd_actions_report();
+ {
+  char report[410];
+  sceClibSnprintf(report,sizeof(report),
+   "TouchOnVita v0.60\nconfig_read=%d parsed=%d invalid=%d\n"
+   "mode=%d fast=%d native_click=%d spatial=%d menu_click=%d\n"
+   "engine_compatible=%d touch_hooks=%d%d%d%d display_hook=%d "
+   "gui_hook=%d focus_hook=%d assets_loaded=%d\n",
+   config_read_state,config_fields,config_unknown,mode,dd_fast_input,
+   dd_direct_click,dd_spatial_only,dd_menu_click,engine_compatible,
+   enabled[0],enabled[1],enabled[2],enabled[3],enabled[4],
+   enabled[14],enabled[15],ui_assets_complete());
+  trace_once("ux0:data/DDTouchUI/startup_v060.txt",report);
+ }
  if(!(enabled[0]||enabled[1]||enabled[2]||enabled[3]) || !enabled[4]){
-  ui_audio_stop();release();return SCE_KERNEL_START_FAILED;
+  ui_assets_stop_retry();ui_audio_stop();release();return SCE_KERNEL_START_FAILED;
  }
  return SCE_KERNEL_START_SUCCESS;
 }
@@ -1857,6 +1987,7 @@ int module_stop(SceSize argc,const void*args){
   if(dd_widget_probe)dd_widget_fast_report();
   ui_state_report();
  }
+ ui_assets_stop_retry();
  ui_audio_stop();
  release();
  return SCE_KERNEL_STOP_SUCCESS;
